@@ -14,20 +14,81 @@ if pipeworks_path then
 	-- pipeworks was found
 	minetest.debug(DEBUG_PREFIX .. "pipeworks found:", pipeworks_path)
 	
+	-- pipeworks does not expose an API for its teleporting tubes, so we have
+	-- to recreate a lot of its internals.
+	
+	-- Read pipeworks teleport tube database.
+	local function read_tube_db()
+		local filename = minetest.get_worldpath() .. "/teleport_tubes"
+		local file = io.open(filename, "r")
+		if file ~= nil then
+			local file_content = file:read("*all")
+			io.close(file)
+			if file_content and file_content ~= "" then
+				local tp_tube_db = minetest.deserialize(file_content)
+				tp_tube_db.version = nil
+				return tp_tube_db
+			end
+		else
+			return {}
+		end
+	end
+	
+	-- Get node name when node is not loaded.
+	local function read_node_with_vm(pos)
+		local vm = VoxelManip()
+		local MinEdge, MaxEdge = vm:read_from_map(pos, pos)
+		local data = vm:get_data()
+		local area = VoxelArea:new({MinEdge = MinEdge, MaxEdge = MaxEdge})
+		return minetest.get_name_from_content_id(data[area:index(pos.x, pos.y, pos.z)])
+	end
+	
+	-- Get teleport tube receiver.
+	local function get_receiver(pos, channel)
+		-- Because we don't have access to pipeworks's database, we have to
+		-- read the file every time.
+		local tubes = read_tube_db()
+		local receivers = {}
+		for key, val in pairs(tubes) do
+			-- skip all non-receivers and the tube that it came from as early as possible, as this is called often
+			if (val.cr == 1 and val.channel == channel and (val.x ~= pos.x or val.y ~= pos.y or val.z ~= pos.z)) then
+				local is_loaded = (minetest.get_node_or_nil(val) ~= nil)
+				local node_name = is_loaded and minetest.get_node(val).name or read_node_with_vm(val)
+				
+				if minetest.registered_nodes[node_name] and minetest.registered_nodes[node_name].is_teleport_tube then
+					table.insert(receivers, val)
+				end
+			end
+		end
+		
+		if receivers[1] ~= nil then
+			return receivers[math.random(1,#receivers)]
+		else
+			return nil
+		end
+	end
+	
 	-- This function is basically a copy of eject_items() in
 	-- node_item_ejector.lua, modified for teleporation purposes.
 	local function teleport_items(pos, node, player)
 		minetest.debug(DEBUG_PREFIX .. "beginning teleport ejection")
 		
-		-- TODO: check teleport channel
-		
-		local dir = minetest.facedir_to_dir(node.param2)
-		local destination_pos = vector.add(pos, dir)
-		local destination_node_name = minetest.get_node(destination_pos).name
-		local destination_node_def = minetest.registered_nodes[destination_node_name]
+		-- Determine receiver.
+		local channel = "digtron"
+		local receiver = get_receiver(pos, channel)
+		if receiver == nil then
+			minetest.debug(DEBUG_PREFIX .. "no receivers on channel:", channel)
+			minetest.sound_play("buzzer", {gain=0.5, pos=pos})
+			return false
+		end
 		
 		-- (((Clipped section checking output mode, because teleport ejectors don't have them.)))
 		-- if not pipeworks_path then eject_even_without_pipeworks = true end -- if pipeworks is not installed, always eject into world (there's no other option)
+		-- 
+		-- local dir = minetest.facedir_to_dir(node.param2)
+		-- local destination_pos = vector.add(pos, dir)
+		-- local destination_node_name = minetest.get_node(destination_pos).name
+		-- local destination_node_def = minetest.registered_nodes[destination_node_name]
 		-- 
 		-- local insert_into_pipe = false
 		-- local eject_into_world = false
@@ -79,6 +140,16 @@ if pipeworks_path then
 		
 		-- TODO: actually teleport item.
 		minetest.debug(DEBUG_PREFIX .. "ejecting:", source_stack:get_name(), source_stack:get_count())
+		
+		-- Create a pipeworks.luaentity object at the position of the
+		-- receiver, with zero velocity.
+		local receiver_pos = vector.new(receiver.x, receiver.y, receiver.z)
+		local obj = pipeworks.luaentity.add_entity(receiver_pos, "pipeworks:tubed_item")
+		obj:set_item(source_stack:to_string())
+		obj.start_pos = receiver_pos
+		obj:set_velocity(vector.new(0, 0, 0))
+		obj.owner = player:get_player_name()
+		minetest.debug(DEBUG_PREFIX .. "teleported to:", receiver.x, receiver.y, receiver.z)
 		
 		-- Remove teleported item from inventory.
 		local meta = minetest.get_meta(source_node.pos)
