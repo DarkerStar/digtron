@@ -20,7 +20,7 @@ if pipeworks_path then
 		-- TODO: make docs (use regular item ejector docs for now)
 		_doc_items_longdesc = digtron.doc.inventory_ejector_longdesc,
 		_doc_items_usagehelp = digtron.doc.inventory_ejector_usagehelp,
-		groups = {cracky = 3,  oddly_breakable_by_hand=3, digtron = 1},
+		groups = {cracky = 3, oddly_breakable_by_hand=3, digtron = 9},
 		tiles = {"digtron_plate.png", "digtron_plate.png", "digtron_plate.png", "digtron_plate.png", "digtron_plate.png^digtron_teleport.png", "digtron_plate.png^digtron_teleport_back.png"},
 		drawtype = "nodebox",
 		sounds = digtron.metal_sounds,
@@ -35,8 +35,18 @@ if pipeworks_path then
 				{-0.1875, -0.1875, 0.3125, 0.1875, 0.1875, 0.5}, -- NodeBox3
 			}
 		},
+		
+		on_construct = function(pos)
+			local meta = minetest.get_meta(pos)
+			meta:set_string("autoeject", "true")
+		end,
+		
+		execute_eject = function(pos, node, player)
+			minetest.debug(DEBUG_PREFIX .. "EJECT!!!")
+		end,
 	})
 	minetest.debug(DEBUG_PREFIX .. "registering node: success")
+	
 else
 	-- pipeworks was not found
 	minetest.debug(DEBUG_PREFIX .. "pipeworks not found")
